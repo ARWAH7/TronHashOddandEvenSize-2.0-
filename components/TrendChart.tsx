@@ -16,14 +16,28 @@ const TrendChart: React.FC<TrendChartProps> = memo(({ blocks, mode, title, rows 
   }, [blocks, mode, rows]);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const isInitialMount = useRef(true);
+  const lastScrollWidth = useRef(0);
 
   useEffect(() => {
-    if (containerRef.current) {
-      containerRef.current.scrollTo({
-        left: containerRef.current.scrollWidth,
-        behavior: 'auto'
+    const container = containerRef.current;
+    if (!container) return;
+
+    // 检查之前是否在最右侧（允许一定的阈值偏移以提高容错）
+    const wasAtEnd = lastScrollWidth.current === 0 || 
+                     container.scrollLeft + container.clientWidth >= lastScrollWidth.current - 80;
+
+    // 初始加载、视图重置（通过key触发）或者处于末尾时，执行滚动
+    if (isInitialMount.current || wasAtEnd) {
+      container.scrollTo({
+        left: container.scrollWidth,
+        behavior: isInitialMount.current ? 'auto' : 'smooth'
       });
+      isInitialMount.current = false;
     }
+    
+    // 更新宽度记录
+    lastScrollWidth.current = container.scrollWidth;
   }, [grid]);
 
   const stats = useMemo(() => {

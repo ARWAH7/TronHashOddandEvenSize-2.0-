@@ -186,7 +186,6 @@ const App: React.FC = () => {
     if (!apiKey || isLoading) return;
 
     const poll = async () => {
-      // Removed document.hidden check to allow background sync
       if (isPollingBusy.current) return;
       isPollingBusy.current = true;
       try {
@@ -197,7 +196,6 @@ const App: React.FC = () => {
         if (latest.height > currentTopHeight) {
           setIsSyncing(true);
           const newBlocks: BlockData[] = [];
-          // Batch fetch only the missing range
           for (let h = currentTopHeight + 1; h <= latest.height; h++) {
             try {
               const b = await fetchBlockByNum(h, apiKey);
@@ -225,10 +223,8 @@ const App: React.FC = () => {
       }
     };
 
-    // Standard interval
     const pollingId = window.setInterval(poll, 3000);
 
-    // Immediate catch-up when window becomes visible
     const handleVisibilityChange = () => {
       if (!document.hidden) {
         poll(); 
@@ -281,7 +277,7 @@ const App: React.FC = () => {
         <div className="w-full flex justify-between items-center mb-6">
           <div className="w-10"></div>
           <h1 className="text-2xl md:text-4xl font-black text-blue-600 tracking-tight text-center">
-            哈希实时分析 <span className="text-gray-300 font-light mx-2">|</span> <span className="text-gray-400">路图大盘</span>
+            Tron哈希走势图
           </h1>
           <button 
             onClick={() => setShowSettings(true)}
@@ -355,16 +351,24 @@ const App: React.FC = () => {
         {activeTab === 'dashboard' ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12 animate-in fade-in zoom-in-95 duration-500">
             <div className="min-h-[280px] h-auto">
-              <TrendChart blocks={ruleFilteredBlocks} mode="parity" title="单双走势 (大路)" rows={activeRule.trendRows} />
+              <TrendChart 
+                key={`parity-trend-dashboard-${activeRuleId}`}
+                blocks={ruleFilteredBlocks} mode="parity" title="单双走势 (大路)" rows={activeRule.trendRows} />
             </div>
             <div className="min-h-[280px] h-auto">
-              <TrendChart blocks={ruleFilteredBlocks} mode="size" title="大小走势 (大路)" rows={activeRule.trendRows} />
+              <TrendChart 
+                key={`size-trend-dashboard-${activeRuleId}`}
+                blocks={ruleFilteredBlocks} mode="size" title="大小走势 (大路)" rows={activeRule.trendRows} />
             </div>
             <div className="min-h-[280px] h-auto">
-              <BeadRoad blocks={ruleFilteredBlocks} mode="parity" title="单双珠盘路" rows={activeRule.beadRows} />
+              <BeadRoad 
+                key={`parity-bead-dashboard-${activeRuleId}`}
+                blocks={ruleFilteredBlocks} mode="parity" title="单双珠盘路" rows={activeRule.beadRows} />
             </div>
             <div className="min-h-[280px] h-auto">
-              <BeadRoad blocks={ruleFilteredBlocks} mode="size" title="大小珠盘路" rows={activeRule.beadRows} />
+              <BeadRoad 
+                key={`size-bead-dashboard-${activeRuleId}`}
+                blocks={ruleFilteredBlocks} mode="size" title="大小珠盘路" rows={activeRule.beadRows} />
             </div>
           </div>
         ) : (
@@ -378,10 +382,10 @@ const App: React.FC = () => {
               </h2>
             </div>
             <div className="min-h-[450px] h-auto">
-              {activeTab === 'parity-trend' && <TrendChart blocks={ruleFilteredBlocks} mode="parity" title="单双走势 (全量统计)" rows={activeRule.trendRows} />}
-              {activeTab === 'size-trend' && <TrendChart blocks={ruleFilteredBlocks} mode="size" title="大小走势 (全量统计)" rows={activeRule.trendRows} />}
-              {activeTab === 'parity-bead' && <BeadRoad blocks={ruleFilteredBlocks} mode="parity" title="单双珠盘 (原始序列)" rows={activeRule.beadRows} />}
-              {activeTab === 'size-bead' && <BeadRoad blocks={ruleFilteredBlocks} mode="size" title="大小珠盘 (原始序列)" rows={activeRule.beadRows} />}
+              {activeTab === 'parity-trend' && <TrendChart key={`parity-trend-full-${activeRuleId}`} blocks={ruleFilteredBlocks} mode="parity" title="单双走势 (全量统计)" rows={activeRule.trendRows} />}
+              {activeTab === 'size-trend' && <TrendChart key={`size-trend-full-${activeRuleId}`} blocks={ruleFilteredBlocks} mode="size" title="大小走势 (全量统计)" rows={activeRule.trendRows} />}
+              {activeTab === 'parity-bead' && <BeadRoad key={`parity-bead-full-${activeRuleId}`} blocks={ruleFilteredBlocks} mode="parity" title="单双珠盘 (原始序列)" rows={activeRule.beadRows} />}
+              {activeTab === 'size-bead' && <BeadRoad key={`size-bead-full-${activeRuleId}`} blocks={ruleFilteredBlocks} mode="size" title="大小珠盘 (原始序列)" rows={activeRule.beadRows} />}
             </div>
           </div>
         )}

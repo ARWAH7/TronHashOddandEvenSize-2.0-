@@ -15,6 +15,29 @@ const BeadRoad: React.FC<BeadRoadProps> = memo(({ blocks, mode, title, rows = 6 
     return calculateBeadGrid(blocks, mode === 'parity' ? 'type' : 'sizeType', rows);
   }, [blocks, mode, rows]);
 
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isInitialMount = useRef(true);
+  const lastScrollWidth = useRef(0);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // 检查之前是否在最右侧
+    const wasAtEnd = lastScrollWidth.current === 0 || 
+                     container.scrollLeft + container.clientWidth >= lastScrollWidth.current - 80;
+
+    if (isInitialMount.current || wasAtEnd) {
+      container.scrollTo({
+        left: container.scrollWidth,
+        behavior: isInitialMount.current ? 'auto' : 'smooth'
+      });
+      isInitialMount.current = false;
+    }
+    
+    lastScrollWidth.current = container.scrollWidth;
+  }, [grid]);
+
   const stats = useMemo(() => {
     if (mode === 'parity') {
       const odd = blocks.filter(b => b.type === 'ODD').length;
@@ -30,17 +53,6 @@ const BeadRoad: React.FC<BeadRoadProps> = memo(({ blocks, mode, title, rows = 6 
       };
     }
   }, [blocks, mode]);
-
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (containerRef.current) {
-      containerRef.current.scrollTo({
-        left: containerRef.current.scrollWidth,
-        behavior: 'auto'
-      });
-    }
-  }, [grid]);
 
   const renderCell = (type: any, value: number | undefined, colIdx: number, rowIdx: number) => {
     if (!type) return <div key={`${colIdx}-${rowIdx}`} className="w-8 h-8 border-r border-b border-gray-100/30 shrink-0" />;
