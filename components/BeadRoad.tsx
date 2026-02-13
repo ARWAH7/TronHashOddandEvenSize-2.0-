@@ -1,5 +1,5 @@
 
-import React, { useMemo, useRef, useEffect, memo } from 'react';
+import React, { useMemo, useRef, useEffect, useLayoutEffect, memo } from 'react';
 import { BlockData, IntervalRule } from '../types';
 import { calculateBeadGrid } from '../utils/helpers';
 import { Flame } from 'lucide-react';
@@ -23,30 +23,12 @@ const BeadRoad: React.FC<BeadRoadProps> = memo(({ blocks, mode, rule, title, row
     );
   }, [blocks, mode, rows, rule]);
 
-  // 计算网格的唯一标识符，用于强制重新渲染
-  const gridKey = useMemo(() => {
-    // ⚡ 只调用一次 flat()，从后向前遍历替代 reverse + find
-    const flatGrid = grid.flat();
-    const firstCell = flatGrid.find(cell => cell.blockHeight);
-    let lastCell: typeof firstCell = undefined;
-    for (let i = flatGrid.length - 1; i >= 0; i--) {
-      if (flatGrid[i].blockHeight) { lastCell = flatGrid[i]; break; }
-    }
-    const key = `${firstCell?.blockHeight || 'empty'}-${lastCell?.blockHeight || 'empty'}`;
-
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`[BeadRoad] 🔑 Grid Key: ${key} (第一个: ${firstCell?.blockHeight}, 最后一个: ${lastCell?.blockHeight})`);
-    }
-
-    return key;
-  }, [grid]);
-
   const containerRef = useRef<HTMLDivElement>(null);
   const isFirstDataLoad = useRef(true);
   const lastBlocksCount = useRef(blocks.length);
 
-  // Intelligent Scroll Logic
-  useEffect(() => {
+  // Intelligent Scroll Logic — useLayoutEffect 在浏览器绘制前同步执行，避免闪烁
+  useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container || blocks.length === 0) return;
 
@@ -62,14 +44,10 @@ const BeadRoad: React.FC<BeadRoadProps> = memo(({ blocks, mode, rule, title, row
     // Handle initial load specifically when blocks are first populated
     if (isFirstDataLoad.current) {
       scrollToEnd();
-      const raf = requestAnimationFrame(() => {
-        scrollToEnd();
-        setTimeout(scrollToEnd, 150);
-      });
       isFirstDataLoad.current = false;
       lastBlocksCount.current = blocks.length;
-      return () => cancelAnimationFrame(raf);
-    } 
+      return;
+    }
 
     if (blocks.length > lastBlocksCount.current) {
       if (isAtEnd) {
@@ -192,7 +170,7 @@ const BeadRoad: React.FC<BeadRoadProps> = memo(({ blocks, mode, rule, title, row
           ref={containerRef}
           className="overflow-x-auto custom-scrollbar border border-gray-100 bg-gray-50/20 flex-1"
         >
-          <div className="flex h-max w-max pr-2" key={gridKey}>
+          <div className="flex h-max w-max pr-2">
             {grid.map((column, colIdx) => {
               // Generate stable key based on first non-null cell's blockHeight
               const firstNonNullCell = column.find(cell => cell.type !== null);

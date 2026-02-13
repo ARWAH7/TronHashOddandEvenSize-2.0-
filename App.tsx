@@ -115,6 +115,7 @@ const App: React.FC = () => {
   const activeRuleRef = useRef<IntervalRule | undefined>(undefined);  // 存储当前规则，供 WebSocket 使用
   const blocksCacheRef = useRef(new Map<string, CacheEntry>());  // ✅ 阶段3：添加缓存 ref（包含时间戳和规则ID）
   const preloadedRules = useRef<Set<string>>(new Set());  // ✅ 追踪哪些规则已经预加载
+  const preloadAllRulesRef = useRef<() => Promise<void>>(() => Promise.resolve());  // ✅ 预加载函数 ref，避免 WebSocket 闭包过期
 
   // 从后端加载所有配置数据
   useEffect(() => {
@@ -325,13 +326,27 @@ const App: React.FC = () => {
   // ✅ 长龙提醒需要所有规则的区块数据，从缓存合并所有规则的数据
   const dragonListBlocks = useMemo(() => {
     const blocksMap = new Map<number, BlockData>();
+
+    // 合并所有已缓存规则的区块数据
     blocksCache.forEach((cacheEntry) => {
       cacheEntry.data.forEach((block) => {
         blocksMap.set(block.height, block);
       });
     });
-    return Array.from(blocksMap.values()).sort((a, b) => b.height - a.height);
-  }, [blocksCache]);
+
+    // 同时合并当前显示的区块（确保即使缓存未命中，当前规则的数据也包含在内）
+    allBlocks.forEach((block) => {
+      blocksMap.set(block.height, block);
+    });
+
+    const merged = Array.from(blocksMap.values()).sort((a, b) => b.height - a.height);
+
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[DragonData] 合并区块: 缓存规则数=${blocksCache.size}, 合并后总数=${merged.length}`);
+    }
+
+    return merged;
+  }, [blocksCache, allBlocks]);
 
   const displayBlocks = useMemo(() => {
     let filtered = ruleFilteredBlocks;
@@ -412,6 +427,11 @@ const App: React.FC = () => {
     console.log(`[预加载] 💾 内存占用: 约 ${(successCount * 264 * 0.5 / 1024).toFixed(2)} MB`);
   }, [rules]);
 
+  // ✅ 保持 preloadAllRulesRef 始终指向最新的 preloadAllRules 函数
+  useEffect(() => {
+    preloadAllRulesRef.current = preloadAllRules;
+  }, [preloadAllRules]);
+
   // 从后端 API 加载历史数据的函数（优化版：优先使用缓存）
   const loadHistoryBlocks = useCallback(async (forceReload: boolean = false) => {
     try {
@@ -427,17 +447,6 @@ const App: React.FC = () => {
         
         // 缓存未过期（30秒）
         if (cacheAge < 30000) {
-          // ⚡ 智能跳过：比较数据是否真正变化，避免无意义的状态更新引发重渲染级联
-          const currentBlocks = blocksRef.current;
-          if (
-            currentBlocks.length === cacheEntry.data.length &&
-            currentBlocks.length > 0 &&
-            currentBlocks[0]?.height === cacheEntry.data[0]?.height &&
-            currentBlocks[currentBlocks.length - 1]?.height === cacheEntry.data[cacheEntry.data.length - 1]?.height
-          ) {
-            console.log('[缓存] ⚡ 数据未变化，跳过状态更新（避免重渲染）');
-            return;
-          }
           console.log(`[缓存] ✅ 使用缓存（0ms），规则: ${activeRule?.label}`);
           setAllBlocks(cacheEntry.data);
           return;
@@ -563,10 +572,10 @@ const App: React.FC = () => {
           // 重置重连次数
           reconnectAttempts = 0;
           
-          // ✅ 只在首次连接时预加载所有规则
+          // ✅ 只在首次连接时预加载所有规则（使用 ref 避免闭包过期）
           if (isFirstConnection) {
             isFirstConnection = false;
-            preloadAllRules();
+            preloadAllRulesRef.current();
           }
         };
 
@@ -625,10 +634,14 @@ const App: React.FC = () => {
                 }
               });
               
-              if (updateCount > 0 && process.env.NODE_ENV === 'development') {
-                console.log(`[WebSocket] 🔄 同步更新 ${updateCount} 个规则缓存（区块: ${block.height}）`);
+              if (updateCount > 0) {
+                // 同步更新 ref，确保其他代码能立即读取到最新缓存
+                blocksCacheRef.current = newCache;
+                if (process.env.NODE_ENV === 'development') {
+                  console.log(`[WebSocket] 🔄 同步更新 ${updateCount} 个规则缓存（区块: ${block.height}）`);
+                }
               }
-              
+
               return newCache;
             });
             
@@ -654,6 +667,8 @@ const App: React.FC = () => {
                 setAllBlocks(prev => {
                   if (prev.some(b => b.height === block.height)) return prev; // 去重
                   const updated = [block, ...prev].slice(0, 264);
+                  // 同步更新 blocksRef，避免其他代码读取到过期数据
+                  blocksRef.current = updated;
                   if (process.env.NODE_ENV === 'development') {
                     console.log(`[WebSocket] ✅ 实时更新显示: ${currentRule.label}, 最新区块: ${block.height}`);
                   }
