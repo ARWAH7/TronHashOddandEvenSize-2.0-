@@ -1,5 +1,5 @@
 
-import React, { useMemo, useRef, useEffect, memo } from 'react';
+import React, { useMemo, useRef, useEffect, useLayoutEffect, memo } from 'react';
 import { BlockData } from '../types';
 import { calculateTrendGrid } from '../utils/helpers';
 import { Flame } from 'lucide-react';
@@ -20,8 +20,8 @@ const TrendChart: React.FC<TrendChartProps> = memo(({ blocks, mode, title, rows 
   const isFirstDataLoad = useRef(true);
   const lastBlocksCount = useRef(blocks.length);
 
-  // Intelligent Scroll Logic
-  useEffect(() => {
+  // Intelligent Scroll Logic — useLayoutEffect 在浏览器绘制前同步执行，避免闪烁
+  useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container || blocks.length === 0) return;
 
@@ -37,16 +37,11 @@ const TrendChart: React.FC<TrendChartProps> = memo(({ blocks, mode, title, rows 
     // First time data arrives after component mount (or rule switch remount)
     if (isFirstDataLoad.current) {
       scrollToEnd();
-      // Ensure it scrolls correctly after the grid is rendered in the DOM
-      const raf = requestAnimationFrame(() => {
-        scrollToEnd();
-        setTimeout(scrollToEnd, 150);
-      });
       isFirstDataLoad.current = false;
       lastBlocksCount.current = blocks.length;
-      return () => cancelAnimationFrame(raf);
-    } 
-    
+      return;
+    }
+
     // Real-time update logic: follow only if user is at the latest data
     if (blocks.length > lastBlocksCount.current) {
       if (isAtEnd) {
