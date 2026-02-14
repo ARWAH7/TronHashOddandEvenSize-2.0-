@@ -52,6 +52,19 @@ export interface PredictionHistoryItem extends AIPredictionResult {
   ruleId?: string;
 }
 
+// 长龙统计记录
+export interface DragonStatRecord {
+  id: string;
+  timestamp: number;
+  ruleId: string;
+  ruleName: string;
+  type: 'parity' | 'size';
+  mode: 'trend' | 'bead';
+  rawType: 'ODD' | 'EVEN' | 'BIG' | 'SMALL';
+  streakLength: number;
+  rowId?: number;
+}
+
 export type IntervalType = number;
 
 export interface GridCell {

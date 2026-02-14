@@ -1,7 +1,8 @@
 
-import React, { useMemo, memo, useCallback, useState } from 'react';
-import { BlockData, IntervalRule, FollowedPattern } from '../types';
-import { Info, ChevronRight, Grid3X3, BarChart3, Heart, Star, Filter } from 'lucide-react';
+import React, { useMemo, memo, useCallback, useState, useEffect, useRef } from 'react';
+import { BlockData, IntervalRule, FollowedPattern, DragonStatRecord } from '../types';
+import { Info, ChevronRight, Grid3X3, BarChart3, Heart, Star, Filter, Play, Square, Trash2, ChevronDown, ChevronUp, Activity } from 'lucide-react';
+import { loadDragonStats, debouncedSaveDragonStats, clearDragonStats as clearDragonStatsAPI } from '../services/dragonStatsApi';
 
 interface DragonListProps {
   allBlocks: BlockData[];
@@ -29,6 +30,24 @@ type DragonFilter = 'ALL' | 'ODD' | 'EVEN' | 'BIG' | 'SMALL';
 
 const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followedPatterns, onToggleFollow, onJumpToChart }) => {
   const [activeFilter, setActiveFilter] = useState<DragonFilter>('ALL');
+  const [isTracking, setIsTracking] = useState(false);
+  const [dragonRecords, setDragonRecords] = useState<DragonStatRecord[]>([]);
+  const [showStats, setShowStats] = useState(false);
+  const prevDragonsRef = useRef<string>('');
+  const isInitializedRef = useRef(false);
+
+  // Load saved stats on mount
+  useEffect(() => {
+    const load = async () => {
+      const saved = await loadDragonStats();
+      if (saved) {
+        if (saved.records) setDragonRecords(saved.records);
+        if (saved.isTracking) setIsTracking(saved.isTracking);
+      }
+      isInitializedRef.current = true;
+    };
+    load();
+  }, []);
 
   const { trendDragons, beadRowDragons, followedResults } = useMemo(() => {
     const trendResults: DragonInfo[] = [];
@@ -82,11 +101,11 @@ const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followed
           threshold,
           nextHeight
         };
-        
+
         const matchesFilter = activeFilter === 'ALL' || info.rawType === activeFilter;
         if (streak.count >= threshold && matchesFilter) trendResults.push(info);
 
-        const isFollowed = followedPatterns.find(fp => 
+        const isFollowed = followedPatterns.find(fp =>
           fp.ruleId === rule.id && fp.type === type && fp.mode === 'trend'
         );
         if (isFollowed && matchesFilter) watchResults.push(info);
@@ -96,17 +115,14 @@ const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followed
       addTrendDragon('size', calculateStreak('sizeType'));
 
       // 2. 珠盘路行级长龙 (Bead Row)
-      // 使用与 BeadRoad 组件一致的物理对齐逻辑进行行扫描
       for (let r = 0; r < rows; r++) {
-        // 筛选出属于物理第 r 行的区块（r=0 为第一行）
         const rowItems = filtered.filter(b => {
           const logicalIdx = Math.floor((b.height - epoch) / interval);
           return (logicalIdx % rows) === r;
         });
-        
+
         if (rowItems.length === 0) continue;
-        
-        // rowItems 已经是从最新到最旧排序
+
         const calcRowStreak = (key: 'type' | 'sizeType') => {
           let count = 0;
           const firstVal = rowItems[0][key];
@@ -119,8 +135,7 @@ const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followed
 
         const rpStreak = calcRowStreak('type');
         const rsStreak = calcRowStreak('sizeType');
-        
-        // 该行下一个出球的预期高度
+
         const rowNextHeight = rowItems[0].height + (interval * rows);
 
         const addBeadDragon = (type: 'parity' | 'size', streak: any) => {
@@ -135,13 +150,13 @@ const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followed
             color: streak.value === 'ODD' || streak.value === 'BIG' ? (type === 'parity' ? 'var(--color-odd)' : 'var(--color-big)') : (type === 'parity' ? 'var(--color-even)' : 'var(--color-small)'),
             threshold,
             nextHeight: rowNextHeight,
-            rowId: r + 1 // 物理行号 (1-indexed)
+            rowId: r + 1
           };
-          
+
           const matchesFilter = activeFilter === 'ALL' || info.rawType === activeFilter;
           if (streak.count >= threshold && matchesFilter) beadResults.push(info);
 
-          const isFollowed = followedPatterns.find(fp => 
+          const isFollowed = followedPatterns.find(fp =>
             fp.ruleId === rule.id && fp.type === type && fp.mode === 'bead' && fp.rowId === (r + 1)
           );
           if (isFollowed && matchesFilter) watchResults.push(info);
@@ -152,18 +167,119 @@ const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followed
       }
     });
 
-    return { 
+    return {
       trendDragons: trendResults.sort((a, b) => b.count - a.count),
       beadRowDragons: beadResults.sort((a, b) => b.count - a.count),
       followedResults: watchResults.sort((a, b) => b.count - a.count)
     };
   }, [allBlocks, rules, followedPatterns, activeFilter]);
 
+  // Dragon tracking logic
+  useEffect(() => {
+    if (!isTracking || !isInitializedRef.current) return;
+
+    const allDragons = [...trendDragons, ...beadRowDragons];
+    const fingerprint = allDragons.map(d =>
+      `${d.ruleId}|${d.type}|${d.mode}|${d.rowId || ''}|${d.rawType}|${d.count}`
+    ).sort().join(';;');
+
+    if (fingerprint === prevDragonsRef.current) return;
+    prevDragonsRef.current = fingerprint;
+
+    setDragonRecords(prev => {
+      const updated = [...prev];
+
+      for (const dragon of allDragons) {
+        const key = `${dragon.ruleId}|${dragon.type}|${dragon.mode}|${dragon.rowId || ''}|${dragon.rawType}`;
+        const existing = updated.find(r =>
+          `${r.ruleId}|${r.type}|${r.mode}|${r.rowId || ''}|${r.rawType}` === key
+        );
+
+        if (existing) {
+          // Update max streak length
+          if (dragon.count > existing.streakLength) {
+            existing.streakLength = dragon.count;
+            existing.timestamp = Date.now();
+          }
+        } else {
+          // New dragon detected
+          updated.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            timestamp: Date.now(),
+            ruleId: dragon.ruleId,
+            ruleName: dragon.ruleName,
+            type: dragon.type,
+            mode: dragon.mode,
+            rawType: dragon.rawType,
+            streakLength: dragon.count,
+            rowId: dragon.rowId
+          });
+        }
+      }
+
+      // Debounced save to backend
+      debouncedSaveDragonStats({ records: updated, isTracking: true });
+      return updated;
+    });
+  }, [trendDragons, beadRowDragons, isTracking]);
+
+  // Statistics calculations
+  const statsData = useMemo(() => {
+    if (dragonRecords.length === 0) return null;
+
+    const byRawType = { ODD: 0, EVEN: 0, BIG: 0, SMALL: 0 };
+    const byMode = { trend: 0, bead: 0 };
+    const byStreak: Record<string, number> = {};
+    const byRule: Record<string, { ruleName: string; total: number; trend: number; bead: number; byRawType: Record<string, number>; byStreak: Record<string, number> }> = {};
+
+    for (const rec of dragonRecords) {
+      byRawType[rec.rawType]++;
+      byMode[rec.mode]++;
+
+      const streakKey = rec.streakLength >= 10 ? '10+' : String(rec.streakLength);
+      byStreak[streakKey] = (byStreak[streakKey] || 0) + 1;
+
+      if (!byRule[rec.ruleId]) {
+        byRule[rec.ruleId] = {
+          ruleName: rec.ruleName, total: 0, trend: 0, bead: 0,
+          byRawType: { ODD: 0, EVEN: 0, BIG: 0, SMALL: 0 },
+          byStreak: {}
+        };
+      }
+      const ruleStats = byRule[rec.ruleId];
+      ruleStats.total++;
+      ruleStats[rec.mode]++;
+      ruleStats.byRawType[rec.rawType] = (ruleStats.byRawType[rec.rawType] || 0) + 1;
+      const rStreakKey = rec.streakLength >= 10 ? '10+' : String(rec.streakLength);
+      ruleStats.byStreak[rStreakKey] = (ruleStats.byStreak[rStreakKey] || 0) + 1;
+    }
+
+    return { byRawType, byMode, byStreak, byRule, total: dragonRecords.length };
+  }, [dragonRecords]);
+
+  const handleStartTracking = useCallback(() => {
+    setIsTracking(true);
+    prevDragonsRef.current = '';
+    debouncedSaveDragonStats({ records: dragonRecords, isTracking: true });
+  }, [dragonRecords]);
+
+  const handleStopTracking = useCallback(() => {
+    setIsTracking(false);
+    debouncedSaveDragonStats({ records: dragonRecords, isTracking: false });
+  }, [dragonRecords]);
+
+  const handleClearStats = useCallback(async () => {
+    if (!window.confirm('确定要清除所有长龙统计数据吗？')) return;
+    setDragonRecords([]);
+    prevDragonsRef.current = '';
+    await clearDragonStatsAPI();
+  }, []);
+
   const renderDragonCard = useCallback((dragon: DragonInfo, index: number, isFollowedView: boolean = false) => {
-    const isFollowed = !!followedPatterns.find(fp => 
-      fp.ruleId === dragon.ruleId && 
-      fp.type === dragon.type && 
-      fp.mode === dragon.mode && 
+    const isFollowed = !!followedPatterns.find(fp =>
+      fp.ruleId === dragon.ruleId &&
+      fp.type === dragon.type &&
+      fp.mode === dragon.mode &&
       fp.rowId === dragon.rowId
     );
 
@@ -184,7 +300,7 @@ const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followed
     };
 
     return (
-      <div 
+      <div
         key={`${dragon.ruleName}-${dragon.type}-${dragon.mode}-${dragon.rowId || 't'}-${index}-${isFollowedView ? 'v' : 'm'}`}
         onClick={handleCardClick}
         className={`group relative bg-white rounded-2xl p-4 border transition-all duration-300 cursor-pointer ${
@@ -203,7 +319,7 @@ const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followed
             )}
           </div>
           <div className="flex items-center space-x-2">
-             <button 
+             <button
                 onClick={handleFollowClick}
                 className={`p-1.5 rounded-full transition-all active:scale-90 ${
                   isFollowed ? 'text-red-500 bg-red-50' : 'text-gray-300 hover:text-gray-400 hover:bg-gray-100'
@@ -218,7 +334,7 @@ const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followed
         <div className="flex items-end justify-between border-b border-gray-200/50 pb-4 mb-4">
           <div>
             <div className="flex items-center space-x-2">
-              <div 
+              <div
                 style={{ backgroundColor: dragon.color }}
                 className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-base font-black shadow-md"
               >
@@ -278,6 +394,8 @@ const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followed
       {label}
     </button>
   );
+
+  const streakKeys = ['3', '4', '5', '6', '7', '8', '9', '10+'];
 
   return (
     <div className="space-y-10">
@@ -382,7 +500,150 @@ const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followed
           )}
         </div>
       </div>
-      
+
+      {/* Dragon Statistics Panel */}
+      <section className="bg-white rounded-[2.5rem] p-8 shadow-xl border border-gray-100">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center space-x-3">
+            <div className="p-2.5 bg-violet-50 rounded-2xl">
+              <Activity className="w-6 h-6 text-violet-500" />
+            </div>
+            <div>
+              <h2 className="text-xl font-black text-gray-900">3. 长龙统计面板</h2>
+              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                {isTracking ? '统计进行中' : '统计已停止'} · 已记录 {dragonRecords.length} 条
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {!isTracking ? (
+              <button
+                onClick={handleStartTracking}
+                className="px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-green-50 text-green-600 border border-green-200 hover:bg-green-100 flex items-center space-x-1.5"
+              >
+                <Play className="w-3 h-3" />
+                <span>开始统计</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleStopTracking}
+                className="px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100 flex items-center space-x-1.5"
+              >
+                <Square className="w-3 h-3" />
+                <span>停止统计</span>
+              </button>
+            )}
+            <button
+              onClick={handleClearStats}
+              className="px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 flex items-center space-x-1.5"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>清除</span>
+            </button>
+            <button
+              onClick={() => setShowStats(!showStats)}
+              className="px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100 flex items-center space-x-1.5"
+            >
+              {showStats ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+              <span>{showStats ? '收起' : '展开'}</span>
+            </button>
+          </div>
+        </div>
+
+        {showStats && statsData && (
+          <div className="space-y-6">
+            {/* 1. By Result Type */}
+            <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
+              <h3 className="text-xs font-black text-gray-500 uppercase tracking-wider mb-3">1. 按结果类型</h3>
+              <div className="grid grid-cols-4 gap-3">
+                {(['ODD', 'EVEN', 'BIG', 'SMALL'] as const).map(t => (
+                  <div key={t} className="bg-white rounded-xl p-3 border border-gray-100 text-center">
+                    <p className="text-[9px] font-black text-gray-400 uppercase">{t === 'ODD' ? '单' : t === 'EVEN' ? '双' : t === 'BIG' ? '大' : '小'}</p>
+                    <p className="text-2xl font-black text-gray-800 tabular-nums">{statsData.byRawType[t]}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 2. By Dragon Type */}
+            <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
+              <h3 className="text-xs font-black text-gray-500 uppercase tracking-wider mb-3">2. 按龙类型</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-white rounded-xl p-3 border border-gray-100 text-center">
+                  <p className="text-[9px] font-black text-gray-400 uppercase">走势龙</p>
+                  <p className="text-2xl font-black text-amber-600 tabular-nums">{statsData.byMode.trend}</p>
+                </div>
+                <div className="bg-white rounded-xl p-3 border border-gray-100 text-center">
+                  <p className="text-[9px] font-black text-gray-400 uppercase">珠盘龙</p>
+                  <p className="text-2xl font-black text-indigo-600 tabular-nums">{statsData.byMode.bead}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. By Streak Length */}
+            <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
+              <h3 className="text-xs font-black text-gray-500 uppercase tracking-wider mb-3">3. 按连出长度</h3>
+              <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
+                {streakKeys.map(k => (
+                  <div key={k} className="bg-white rounded-xl p-2 border border-gray-100 text-center">
+                    <p className="text-[8px] font-black text-gray-400 uppercase">{k}连</p>
+                    <p className="text-lg font-black text-gray-800 tabular-nums">{statsData.byStreak[k] || 0}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 4. By Rule */}
+            <div className="bg-gray-50 rounded-2xl p-5 border border-gray-100">
+              <h3 className="text-xs font-black text-gray-500 uppercase tracking-wider mb-3">4. 按采样规则</h3>
+              {Object.keys(statsData.byRule).length === 0 ? (
+                <p className="text-[10px] text-gray-400 font-bold text-center py-4">暂无数据</p>
+              ) : (
+                <div className="space-y-3">
+                  {Object.entries(statsData.byRule).map(([ruleId, rule]) => (
+                    <div key={ruleId} className="bg-white rounded-xl p-4 border border-gray-100">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-black text-gray-700">{rule.ruleName}</span>
+                        <span className="text-[9px] font-black text-gray-400">
+                          走势 {rule.trend} / 珠盘 {rule.bead} · 共 {rule.total} 条
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {(['ODD', 'EVEN', 'BIG', 'SMALL'] as const).map(t => (
+                          <span key={t} className="px-2 py-0.5 bg-gray-50 rounded text-[8px] font-black text-gray-500 border border-gray-100">
+                            {t === 'ODD' ? '单' : t === 'EVEN' ? '双' : t === 'BIG' ? '大' : '小'}: {rule.byRawType[t] || 0}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {streakKeys.map(k => {
+                          const count = rule.byStreak[k] || 0;
+                          if (count === 0) return null;
+                          return (
+                            <span key={k} className="px-1.5 py-0.5 bg-violet-50 rounded text-[8px] font-black text-violet-600 border border-violet-100">
+                              {k}连: {count}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {showStats && !statsData && (
+          <div className="py-12 text-center">
+            <Activity className="w-10 h-10 mx-auto mb-3 text-gray-200" />
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+              暂无统计数据，开始统计后数据将在此展示
+            </p>
+          </div>
+        )}
+      </section>
+
       <div className="p-6 bg-blue-50/50 rounded-[2.5rem] border border-blue-100/50 flex items-start space-x-5">
          <div className="p-3 bg-blue-100 rounded-2xl shrink-0 shadow-sm">
            <Info className="w-5 h-5 text-blue-500" />
@@ -396,6 +657,7 @@ const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followed
              <li><strong>智能跳转</strong>：直接点击任何长龙卡片，系统将为您切换至对应规则的实战分析界面。</li>
              <li><strong>多维筛选</strong>：使用顶部的筛选器可以快速定位特定结果。</li>
              <li><strong>动态高亮</strong>：当关注项连出数较多时卡片会有特殊视觉提示。</li>
+             <li><strong>统计面板</strong>：点击"开始统计"后，系统将自动记录所有出现的长龙，按4个维度汇总统计。</li>
            </ul>
          </div>
       </div>
@@ -405,7 +667,7 @@ const DragonList: React.FC<DragonListProps> = memo(({ allBlocks, rules, followed
 
 DragonList.displayName = 'DragonList';
 
-// ✅ React.memo 优化：只有当关键 props 改变时才重新渲染
+// React.memo optimization
 export default memo(DragonList, (prevProps, nextProps) => {
   return (
     prevProps.allBlocks === nextProps.allBlocks &&
