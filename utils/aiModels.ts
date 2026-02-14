@@ -255,13 +255,11 @@ export const runMonteCarloModel = (seq: string, type: 'parity' | 'size'): ModelR
     
     // 降低阈值，单双预测
     if (oProbability > 0.60) {
-      // 确保置信度至少90%，不设上限
-      const conf = Math.max(90, Math.round(oProbability * 100 + 30));
+      const conf = Math.min(99, Math.max(90, Math.round(oProbability * 100 + 30)));
       return { match: true, val: 'ODD', conf, modelName: '蒙特卡洛模拟' };
     }
     if (eProbability > 0.60) {
-      // 确保置信度至少90%，不设上限
-      const conf = Math.max(90, Math.round(eProbability * 100 + 30));
+      const conf = Math.min(99, Math.max(90, Math.round(eProbability * 100 + 30)));
       return { match: true, val: 'EVEN', conf, modelName: '蒙特卡洛模拟' };
     }
   } else {
@@ -286,13 +284,11 @@ export const runMonteCarloModel = (seq: string, type: 'parity' | 'size'): ModelR
     
     // 降低阈值，大小预测
     if (bProbability > 0.60) {
-      // 确保置信度至少90%，不设上限
-      const conf = Math.max(90, Math.round(bProbability * 100 + 30));
+      const conf = Math.min(99, Math.max(90, Math.round(bProbability * 100 + 30)));
       return { match: true, val: 'BIG', conf, modelName: '蒙特卡洛模拟' };
     }
     if (sProbability > 0.60) {
-      // 确保置信度至少90%，不设上限
-      const conf = Math.max(90, Math.round(sProbability * 100 + 30));
+      const conf = Math.min(99, Math.max(90, Math.round(sProbability * 100 + 30)));
       return { match: true, val: 'SMALL', conf, modelName: '蒙特卡洛模拟' };
     }
   }
@@ -398,8 +394,7 @@ export const runMarkovModel = (seq: string, type: 'parity' | 'size'): ModelResul
         }
         
         if (val !== 'NEUTRAL') {
-          // 确保置信度至少90%，不设上限
-          const conf = Math.max(90, Math.round(maxProb * 100));
+          const conf = Math.min(99, Math.max(90, Math.round(maxProb * 100)));
           return { match: true, val, conf, modelName: '马尔可夫状态迁移' };
         }
       }
@@ -428,4 +423,134 @@ export const getBayesianConf = (bias: number) => {
   if (deviation > 0.15) return 92;
   if (deviation > 0.10) return 90;
   return 50;
+};
+
+// ============================================
+// 10. 游程编码分析 (RLE)
+// ============================================
+export const runRLEModel = (seq: string, type: 'parity' | 'size'): ModelResult => {
+  const len = seq.length;
+  if (len < 12) return { match: false, val: 'NEUTRAL', conf: 0, modelName: '游程编码分析' };
+
+  // 将序列分割为连续段（runs）
+  const runs: { char: string; length: number }[] = [];
+  let i = 0;
+  while (i < len) {
+    const char = seq[i];
+    let runLen = 1;
+    while (i + runLen < len && seq[i + runLen] === char) runLen++;
+    runs.push({ char, length: runLen });
+    i += runLen;
+  }
+
+  if (runs.length < 3) return { match: false, val: 'NEUTRAL', conf: 0, modelName: '游程编码分析' };
+
+  // 计算平均段长
+  const avgRunLen = runs.reduce((sum, r) => sum + r.length, 0) / runs.length;
+  const currentRun = runs[0]; // 最新的段
+
+  // 如果当前段较短（低于平均），预测延续
+  if (currentRun.length < avgRunLen * 0.8 && currentRun.length >= 2) {
+    const val = currentRun.char === 'O' ? 'ODD' : currentRun.char === 'E' ? 'EVEN' : currentRun.char === 'B' ? 'BIG' : 'SMALL';
+    return { match: true, val: val as any, conf: 91, modelName: '游程编码分析' };
+  }
+
+  // 如果当前段已超过平均段长，预测反转
+  if (currentRun.length >= avgRunLen * 1.3 && currentRun.length >= 3) {
+    const reverseChar = type === 'parity'
+      ? (currentRun.char === 'O' ? 'EVEN' : 'ODD')
+      : (currentRun.char === 'B' ? 'SMALL' : 'BIG');
+    return { match: true, val: reverseChar as any, conf: 90, modelName: '游程编码分析' };
+  }
+
+  return { match: false, val: 'NEUTRAL', conf: 0, modelName: '游程编码分析' };
+};
+
+// ============================================
+// 11. 斐波那契回撤分析
+// ============================================
+export const runFibonacciModel = (seq: string, type: 'parity' | 'size'): ModelResult => {
+  const len = seq.length;
+  if (len < 13) return { match: false, val: 'NEUTRAL', conf: 0, modelName: '斐波那契回撤' };
+
+  const fibWindows = [3, 5, 8, 13];
+  const primaryChar = type === 'parity' ? 'O' : 'B';
+  const secondaryChar = type === 'parity' ? 'E' : 'S';
+
+  let primaryWins = 0;
+  let secondaryWins = 0;
+
+  // 在每个斐波那契窗口中统计占比
+  for (const w of fibWindows) {
+    if (w > len) continue;
+    const window = seq.slice(0, w);
+    const pCount = (window.match(new RegExp(primaryChar, 'g')) || []).length;
+    const ratio = pCount / w;
+
+    if (ratio >= 0.618) primaryWins++;
+    else if (ratio <= 0.382) secondaryWins++;
+  }
+
+  // 3+个窗口一致偏向同一值
+  if (primaryWins >= 3) {
+    const val = type === 'parity' ? 'ODD' : 'BIG';
+    return { match: true, val: val as any, conf: 92, modelName: '斐波那契回撤' };
+  }
+  if (secondaryWins >= 3) {
+    const val = type === 'parity' ? 'EVEN' : 'SMALL';
+    return { match: true, val: val as any, conf: 92, modelName: '斐波那契回撤' };
+  }
+
+  return { match: false, val: 'NEUTRAL', conf: 0, modelName: '斐波那契回撤' };
+};
+
+// ============================================
+// 12. 梯度动量模型
+// ============================================
+export const runGradientMomentumModel = (seq: string, type: 'parity' | 'size'): ModelResult => {
+  const len = seq.length;
+  if (len < 15) return { match: false, val: 'NEUTRAL', conf: 0, modelName: '梯度动量模型' };
+
+  const windowSize = 5;
+  const primaryChar = type === 'parity' ? 'O' : 'B';
+
+  // 计算每个滑动窗口内的偏差（主值占比 - 0.5）
+  const gradients: number[] = [];
+  for (let i = 0; i <= len - windowSize; i++) {
+    const window = seq.slice(i, i + windowSize);
+    const count = (window.match(new RegExp(primaryChar, 'g')) || []).length;
+    gradients.push(count / windowSize - 0.5);
+  }
+
+  if (gradients.length < 4) return { match: false, val: 'NEUTRAL', conf: 0, modelName: '梯度动量模型' };
+
+  // 计算梯度变化方向（最近的窗口在前）
+  let increasing = 0;
+  let decreasing = 0;
+  for (let i = 0; i < Math.min(gradients.length - 1, 5); i++) {
+    if (gradients[i] > gradients[i + 1]) increasing++; // 偏差在增加（趋势加速）
+    else if (gradients[i] < gradients[i + 1]) decreasing++; // 偏差在减少（趋势减速）
+  }
+
+  // 连续3+窗口偏差增加 = 加速趋势
+  if (increasing >= 3 && gradients[0] > 0.1) {
+    const val = type === 'parity' ? 'ODD' : 'BIG';
+    return { match: true, val: val as any, conf: 91, modelName: '梯度动量模型' };
+  }
+  if (increasing >= 3 && gradients[0] < -0.1) {
+    const val = type === 'parity' ? 'EVEN' : 'SMALL';
+    return { match: true, val: val as any, conf: 91, modelName: '梯度动量模型' };
+  }
+
+  // 连续3+窗口偏差减少 = 趋势反转信号
+  if (decreasing >= 3 && gradients[0] > 0.1) {
+    const val = type === 'parity' ? 'EVEN' : 'SMALL';
+    return { match: true, val: val as any, conf: 90, modelName: '梯度动量模型' };
+  }
+  if (decreasing >= 3 && gradients[0] < -0.1) {
+    const val = type === 'parity' ? 'ODD' : 'BIG';
+    return { match: true, val: val as any, conf: 90, modelName: '梯度动量模型' };
+  }
+
+  return { match: false, val: 'NEUTRAL', conf: 0, modelName: '梯度动量模型' };
 };

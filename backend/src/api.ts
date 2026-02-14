@@ -16,7 +16,10 @@ import {
   saveBetTasks,
   getBetTasks,
   saveBetConfig,
-  getBetConfig
+  getBetConfig,
+  saveDragonStats,
+  getDragonStats,
+  clearDragonStats
 } from './redis';
 
 export function createAPI(port: number = 3001) {
@@ -607,6 +610,60 @@ export function createAPI(port: number = 3001) {
     }
   });
   
+  // ==================== 长龙统计 API ====================
+
+  // 保存长龙统计
+  app.post('/api/dragon/stats', async (req, res) => {
+    try {
+      const stats = req.body;
+      await saveDragonStats(stats);
+
+      res.json({
+        success: true,
+        message: '长龙统计已保存',
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
+  // 获取长龙统计
+  app.get('/api/dragon/stats', async (req, res) => {
+    try {
+      const stats = await getDragonStats();
+
+      res.json({
+        success: true,
+        data: stats,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
+  // 清除长龙统计
+  app.delete('/api/dragon/stats', async (req, res) => {
+    try {
+      await clearDragonStats();
+
+      res.json({
+        success: true,
+        message: '长龙统计已清除',
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+  });
+
   app.listen(port, () => {
     console.log(`[API] 🚀 REST API 启动在端口 ${port}`);
   });

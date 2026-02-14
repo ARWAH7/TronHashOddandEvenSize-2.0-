@@ -15,6 +15,7 @@ const memoryStorage = {
   betRecords: [] as any[],         // 下注记录
   betTasks: [] as any[],           // 托管任务
   betConfig: null as any,          // 下注配置
+  dragonStats: null as any,        // 长龙统计
 };
 
 // Redis 连接状态
@@ -48,6 +49,7 @@ export const REDIS_KEYS = {
   BET_RECORDS: 'tron:bets:records',          // 下注记录
   BET_TASKS: 'tron:bets:tasks',              // 托管任务
   BET_CONFIG: 'tron:bets:config',            // 下注配置
+  DRAGON_STATS: 'tron:dragon:stats',          // 长龙统计
 };
 
 // 连接事件
@@ -347,7 +349,8 @@ function clearAllFromMemory(): void {
   memoryStorage.betRecords = [];
   memoryStorage.betTasks = [];
   memoryStorage.betConfig = null;
-  
+  memoryStorage.dragonStats = null;
+
   console.log('[Memory Storage] 🗑️ 所有数据已清空');
 }
 
@@ -739,4 +742,52 @@ export async function getBetConfig(): Promise<any> {
 // 从内存中获取下注配置
 function getBetConfigFromMemory(): any {
   return memoryStorage.betConfig;
+}
+
+// ==================== 长龙统计 ====================
+
+// 保存长龙统计
+export async function saveDragonStats(stats: any): Promise<void> {
+  if (redisConnected) {
+    try {
+      await redis.set(REDIS_KEYS.DRAGON_STATS, JSON.stringify(stats));
+    } catch (error) {
+      console.error('[Redis] 保存长龙统计失败:', error);
+      redisConnected = false;
+      memoryStorage.dragonStats = stats;
+    }
+  } else {
+    memoryStorage.dragonStats = stats;
+  }
+}
+
+// 获取长龙统计
+export async function getDragonStats(): Promise<any> {
+  if (redisConnected) {
+    try {
+      const data = await redis.get(REDIS_KEYS.DRAGON_STATS);
+      return data ? JSON.parse(data) : null;
+    } catch (error) {
+      console.error('[Redis] 获取长龙统计失败:', error);
+      redisConnected = false;
+      return memoryStorage.dragonStats;
+    }
+  } else {
+    return memoryStorage.dragonStats;
+  }
+}
+
+// 清除长龙统计
+export async function clearDragonStats(): Promise<void> {
+  if (redisConnected) {
+    try {
+      await redis.del(REDIS_KEYS.DRAGON_STATS);
+    } catch (error) {
+      console.error('[Redis] 清除长龙统计失败:', error);
+      redisConnected = false;
+      memoryStorage.dragonStats = null;
+    }
+  } else {
+    memoryStorage.dragonStats = null;
+  }
 }

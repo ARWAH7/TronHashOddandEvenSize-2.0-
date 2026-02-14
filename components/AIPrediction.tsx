@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, memo, useMemo, useCallback, useRef } from 'react';
 import { BlockData, AIPredictionResult, PredictionHistoryItem, IntervalRule } from '../types';
-import { BrainCircuit, Sparkles, Target, RefreshCw, CheckCircle2, XCircle, Clock, ShieldCheck, Activity, Filter, Trophy, Loader2, ChevronRight, BookOpen, HelpCircle, X, Microscope, Network, Download, Trash2 } from 'lucide-react';
+import { BrainCircuit, Sparkles, Target, RefreshCw, CheckCircle2, XCircle, Clock, ShieldCheck, Activity, Filter, Trophy, Loader2, ChevronRight, BookOpen, HelpCircle, X, Microscope, Network, Download, Trash2, Layers, GitBranch, TrendingUp } from 'lucide-react';
 import { runDeepAnalysisV5, getNextAlignedHeight } from '../utils/aiAnalysis';
 import { InteractiveChart } from './InteractiveChart';
 import { ModelTrendAnalysisModal } from './ModelTrendAnalysisModal';
@@ -47,10 +47,37 @@ const AI_MODELS_DOCS = [
     id: "density",
     name: "密集簇群共振 (Density Clustering)",
     short: "寻找能量爆发点",
-    desc: "基于数据聚类算法。模型扫描微观窗口（近 10 期）内的结果分布密度。当‘单’或‘双’呈现出高密度的聚簇（Cluster）且伴随哈希熵值下降时，代表当前市场能量正在单向释放，此时输出的‘动量信号’具有极高的确定性。",
+    desc: "基于数据聚类算法。模型扫描微观窗口（近 10 期）内的结果分布密度。当'单'或'双'呈现出高密度的聚簇（Cluster）且伴随哈希熵值下降时，代表当前市场能量正在单向释放，此时输出的'动量信号'具有极高的确定性。",
     icon: <Network className="w-5 h-5 text-purple-500" />,
     color: "text-purple-500",
     bg: "bg-purple-50"
+  },
+  {
+    id: "rle",
+    name: "游程编码分析 (Run-Length Encoding)",
+    short: "分析连续段规律",
+    desc: "将序列分割为连续段（Runs），统计每段长度的分布特征。当最近一段的长度尚未达到历史平均段长时，模型预测当前趋势将延续；当段长超过平均值时，预测趋势即将反转。善于捕捉'何时该转向'的临界点。",
+    icon: <Layers className="w-5 h-5 text-cyan-500" />,
+    color: "text-cyan-500",
+    bg: "bg-cyan-50"
+  },
+  {
+    id: "fibonacci",
+    name: "斐波那契回撤 (Fibonacci Retracement)",
+    short: "黄金分割探测",
+    desc: "在斐波那契级数窗口（3、5、8、13 期）内分别统计各值的出现频率。当某一值在 3 个以上窗口中的占比均超过黄金分割比（0.618）时，模型认定趋势具有多尺度一致性，触发高置信度预测信号。",
+    icon: <GitBranch className="w-5 h-5 text-amber-500" />,
+    color: "text-amber-500",
+    bg: "bg-amber-50"
+  },
+  {
+    id: "gradient",
+    name: "梯度动量模型 (Gradient Momentum)",
+    short: "追踪趋势加速度",
+    desc: "通过滑动窗口（5 期）计算偏差的变化速率。当连续 3 个以上窗口的偏差持续增加，说明趋势正在加速，预测延续；当偏差持续下降，说明动能衰减，预测反转。类似于物理中的'加速度'概念。",
+    icon: <TrendingUp className="w-5 h-5 text-rose-500" />,
+    color: "text-rose-500",
+    bg: "bg-rose-50"
   }
 ];
 
@@ -176,11 +203,11 @@ const AIPrediction: React.FC<AIPredictionProps> = memo(({ allBlocks, rules }) =>
       // 清除前端状态
       setHistory([]);
       setModelStats({});
-      
+      setCurrentPage(1);
+      setError(null);
+      setIsPredicting(false);
+
       console.log('[AI 预测] ✅ 已清除所有数据');
-      
-      // 强制刷新页面以确保状态完全重置
-      window.location.reload();
     } catch (error) {
       console.error('[AI 预测] ❌ 清除数据失败:', error);
       setError('清除数据失败，请稍后重试');
@@ -400,46 +427,6 @@ const AIPrediction: React.FC<AIPredictionProps> = memo(({ allBlocks, rules }) =>
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blocksFingerprint, rules]);
-
-  const ruleAccuracyStats = useMemo(() => {
-    const stats: Record<string, { 
-      pAcc: number; sAcc: number; 
-      oddAcc: number; evenAcc: number; 
-      bigAcc: number; smallAcc: number; 
-      total: number 
-    }> = {};
-    
-    rules.forEach(r => {
-      const rHistory = history.filter(h => h.ruleId === r.id && h.resolved);
-      if (rHistory.length === 0) {
-        stats[r.id] = { pAcc: 0, sAcc: 0, oddAcc: 0, evenAcc: 0, bigAcc: 0, smallAcc: 0, total: 0 };
-      } else {
-        const pHistory = rHistory.filter(h => h.nextParity !== 'NEUTRAL');
-        const sHistory = rHistory.filter(h => h.nextSize !== 'NEUTRAL');
-        
-        const oddPreds = pHistory.filter(h => h.nextParity === 'ODD');
-        const evenPreds = pHistory.filter(h => h.nextParity === 'EVEN');
-        const bigPreds = sHistory.filter(h => h.nextSize === 'BIG');
-        const smallPreds = sHistory.filter(h => h.nextSize === 'SMALL');
-
-        const oddAcc = oddPreds.length > 0 ? Math.round((oddPreds.filter(p => p.isParityCorrect).length / oddPreds.length) * 100) : 0;
-        const evenAcc = evenPreds.length > 0 ? Math.round((evenPreds.filter(p => p.isParityCorrect).length / evenPreds.length) * 100) : 0;
-        const bigAcc = bigPreds.length > 0 ? Math.round((bigPreds.filter(p => p.isSizeCorrect).length / bigPreds.length) * 100) : 0;
-        const smallAcc = smallPreds.length > 0 ? Math.round((smallPreds.filter(p => p.isSizeCorrect).length / smallPreds.length) * 100) : 0;
-
-        const pMatch = pHistory.filter(h => h.isParityCorrect).length;
-        const sMatch = sHistory.filter(h => h.isSizeCorrect).length;
-        
-        stats[r.id] = { 
-          pAcc: pHistory.length > 0 ? Math.round((pMatch / pHistory.length) * 100) : 0, 
-          sAcc: sHistory.length > 0 ? Math.round((sMatch / sHistory.length) * 100) : 0,
-          oddAcc, evenAcc, bigAcc, smallAcc,
-          total: rHistory.length 
-        };
-      }
-    });
-    return stats;
-  }, [history, rules]);
 
   useEffect(() => {
     if (allBlocks.length < 50 || isSyncing || !isPredicting) return;
@@ -706,9 +693,6 @@ const AIPrediction: React.FC<AIPredictionProps> = memo(({ allBlocks, rules }) =>
     return Math.ceil(filteredHistory.length / pageSize);
   }, [filteredHistory, pageSize]);
 
-  // Dummy variable to prevent errors (FOCUS PANEL removed)
-  const focusedRuleResult = null;
-
   // 计算模型性能排行（使用累计统计数据）
   const modelPerformance = useMemo(() => {
     // 定义所有9个模型
@@ -721,7 +705,10 @@ const AIPrediction: React.FC<AIPredictionProps> = memo(({ allBlocks, rules }) =>
       '小波变换分析',
       '马尔可夫状态迁移',
       '贝叶斯后验推理',
-      '密集簇群共振'
+      '密集簇群共振',
+      '游程编码分析',
+      '斐波那契回撤',
+      '梯度动量模型'
     ];
     
     return allModels.map(model => {
@@ -785,51 +772,7 @@ const AIPrediction: React.FC<AIPredictionProps> = memo(({ allBlocks, rules }) =>
     return modelScores[0] || null;
   }, [history, modelPerformance]);
 
-  // ⚡ 市场环境识别：从 IIFE 提取为 useMemo
-  const marketEnvironment = useMemo(() => {
-    const recentHistory = history.filter(h => h.resolved).slice(0, 30);
-    if (recentHistory.length < 10) return null;
 
-    const accuracies = recentHistory.map((h, i) => {
-      const upToNow = recentHistory.slice(i);
-      const correct = upToNow.filter(h2 => h2.isParityCorrect || h2.isSizeCorrect).length;
-      return (correct / upToNow.length) * 100;
-    });
-
-    const avgAccuracy = accuracies.reduce((a, b) => a + b, 0) / accuracies.length;
-    const variance = accuracies.reduce((sum, acc) => sum + Math.pow(acc - avgAccuracy, 2), 0) / accuracies.length;
-    const stdDev = Math.sqrt(variance);
-
-    const firstHalf = recentHistory.slice(0, Math.floor(recentHistory.length / 2));
-    const secondHalf = recentHistory.slice(Math.floor(recentHistory.length / 2));
-    const firstHalfAcc = (firstHalf.filter(h => h.isParityCorrect || h.isSizeCorrect).length / firstHalf.length) * 100;
-    const secondHalfAcc = (secondHalf.filter(h => h.isParityCorrect || h.isSizeCorrect).length / secondHalf.length) * 100;
-    const trend = secondHalfAcc - firstHalfAcc;
-
-    let marketCondition: 'stable' | 'volatile' | 'trending_up' | 'trending_down' = 'stable';
-    let conditionText = '稳定';
-    let conditionColor = 'bg-green-50 text-green-700';
-    let conditionIcon = '📊';
-
-    if (stdDev > 15) {
-      marketCondition = 'volatile';
-      conditionText = '波动';
-      conditionColor = 'bg-red-50 text-red-700';
-      conditionIcon = '⚠️';
-    } else if (trend > 10) {
-      marketCondition = 'trending_up';
-      conditionText = '上升';
-      conditionColor = 'bg-blue-50 text-blue-700';
-      conditionIcon = '📈';
-    } else if (trend < -10) {
-      marketCondition = 'trending_down';
-      conditionText = '下降';
-      conditionColor = 'bg-orange-50 text-orange-700';
-      conditionIcon = '📉';
-    }
-
-    return { marketCondition, conditionText, conditionColor, conditionIcon };
-  }, [history]);
 
   return (
     <div className="space-y-12 max-w-7xl mx-auto pb-32 px-4 relative">
@@ -894,7 +837,7 @@ const AIPrediction: React.FC<AIPredictionProps> = memo(({ allBlocks, rules }) =>
                   <span className="text-xs font-black text-blue-600 uppercase tracking-wider">总场次</span>
                 </div>
                 <p className="text-3xl font-black text-blue-900">{totalPredictions}</p>
-                <p className="text-xs text-blue-600 mt-1">{activeModels}/9 模型活跃</p>
+                <p className="text-xs text-blue-600 mt-1">{activeModels}/{modelPerformance.length} 模型活跃</p>
               </div>
 
               {/* 成功预测场次 */}
@@ -1018,179 +961,12 @@ const AIPrediction: React.FC<AIPredictionProps> = memo(({ allBlocks, rules }) =>
 
       {/* 模型性能趋势图表模态框 */}
       {selectedModelForChart && (
-        <ModelTrendAnalysisModal 
-          modelId={selectedModelForChart} 
-          onClose={() => setSelectedModelForChart(null)} 
-          modelStats={modelStats} 
+        <ModelTrendAnalysisModal
+          modelId={selectedModelForChart}
+          onClose={() => setSelectedModelForChart(null)}
+          modelStats={modelStats}
+          history={history}
         />
-      )}
-
-      {/* MATRIX CONTROLS */}
-      <section className="space-y-6">
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
-          <div className="flex items-start space-x-4">
-            <div className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl shadow-lg">
-              <BrainCircuit className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h3 className="text-2xl font-bold text-gray-900">AI 数据稳定演算矩阵</h3>
-              {/* 市场环境识别 */}
-              {!marketEnvironment ? (
-                <div className="flex items-center space-x-2 mt-2">
-                  <span className="px-3 py-1 bg-gray-100 text-gray-500 rounded-lg font-semibold text-sm">
-                    数据收集中...
-                  </span>
-                </div>
-              ) : (
-                <div className="flex items-center space-x-2 mt-2">
-                  <span className={`px-3 py-1 rounded-lg font-semibold text-sm flex items-center space-x-1 ${marketEnvironment.conditionColor}`}>
-                    <span>{marketEnvironment.conditionIcon}</span>
-                    <span>市场环境：{marketEnvironment.conditionText}</span>
-                  </span>
-                  {marketEnvironment.marketCondition === 'volatile' && (
-                    <span className="px-2 py-1 bg-amber-50 text-amber-600 rounded-lg text-xs font-bold">
-                      建议谨慎
-                    </span>
-                  )}
-                  {marketEnvironment.marketCondition === 'trending_up' && (
-                    <span className="px-2 py-1 bg-green-50 text-green-600 rounded-lg text-xs font-bold">
-                      表现改善
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-        
-        {/* MATRIX GRID */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {rulesMatrix.map((item, idx) => {
-            const stats = ruleAccuracyStats[item.rule.id];
-            
-            return (
-              <div 
-                key={idx} 
-                className="bg-white p-5 rounded-2xl border border-gray-100 hover:border-indigo-200 hover:shadow-lg transition-all duration-200 relative group"
-              >
-                {/* Header */}
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="px-2.5 py-1 bg-gray-100 text-gray-700 rounded-lg text-xs font-bold">
-                        {item.rule.label}
-                      </span>
-                      {item.result.shouldPredict && (
-                        <Sparkles className="w-4 h-4 text-amber-500 animate-pulse" />
-                      )}
-                    </div>
-                    
-                    {/* Stats Grid */}
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="flex items-center justify-between px-2 py-1 bg-red-50 rounded">
-                        <span className="text-gray-600 font-medium">单</span>
-                        <span className="text-red-600 font-bold">{stats?.oddAcc || 0}%</span>
-                      </div>
-                      <div className="flex items-center justify-between px-2 py-1 bg-teal-50 rounded">
-                        <span className="text-gray-600 font-medium">双</span>
-                        <span className="text-teal-600 font-bold">{stats?.evenAcc || 0}%</span>
-                      </div>
-                      <div className="flex items-center justify-between px-2 py-1 bg-orange-50 rounded">
-                        <span className="text-gray-600 font-medium">大</span>
-                        <span className="text-orange-600 font-bold">{stats?.bigAcc || 0}%</span>
-                      </div>
-                      <div className="flex items-center justify-between px-2 py-1 bg-indigo-50 rounded">
-                        <span className="text-gray-600 font-medium">小</span>
-                        <span className="text-indigo-600 font-bold">{stats?.smallAcc || 0}%</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Prediction Display */}
-                {item.result.shouldPredict ? (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="text-center p-3 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl">
-                        <span className="text-xs text-gray-500 font-medium block mb-1">单双</span>
-                        <div className="text-2xl font-bold" style={{ 
-                          color: item.result.nextParity === 'NEUTRAL' ? '#94a3b8' : 
-                                (item.result.nextParity === 'ODD' ? '#ef4444' : '#14b8a6') 
-                        }}>
-                          {item.result.nextParity === 'NEUTRAL' ? '-' : 
-                           (item.result.nextParity === 'ODD' ? '单' : '双')}
-                        </div>
-                      </div>
-                      <div className="text-center p-3 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl">
-                        <span className="text-xs text-gray-500 font-medium block mb-1">大小</span>
-                        <div className="text-2xl font-bold" style={{ 
-                          color: item.result.nextSize === 'NEUTRAL' ? '#94a3b8' : 
-                                (item.result.nextSize === 'BIG' ? '#f97316' : '#6366f1') 
-                        }}>
-                          {item.result.nextSize === 'NEUTRAL' ? '-' : 
-                           (item.result.nextSize === 'BIG' ? '大' : '小')}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between text-xs bg-indigo-50 px-3 py-2 rounded-lg">
-                      <span className="text-gray-600 font-medium">目标高度</span>
-                      <span className="text-indigo-600 font-bold tabular-nums">#{item.result.targetHeight}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="py-8 text-center opacity-40">
-                    <Microscope className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-                    <p className="text-xs text-gray-500 font-medium">等待信号...</p>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* FOCUS PANEL - REMOVED */}
-      {false && focusedRuleResult && (
-        <section className="bg-white rounded-[4rem] p-10 md:p-14 shadow-2xl border-4 border-indigo-50 animate-in fade-in slide-in-from-bottom-8 duration-700">
-           <div className="flex flex-col lg:flex-row items-center justify-between gap-12">
-              <div className="flex-1 space-y-8">
-                <div className="flex items-center space-x-6">
-                  <div className="p-5 bg-indigo-600 rounded-[2rem] shadow-xl shadow-indigo-100">
-                    <Target className="w-10 h-10 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="text-4xl font-black text-gray-900 tracking-tight">高置信信号锁定: {focusedRuleResult.rule.label}</h3>
-                    <div className="flex items-center space-x-4 mt-2">
-                      <span className="px-4 py-1.5 bg-indigo-100 text-indigo-700 text-xs font-black rounded-xl border border-indigo-200">目标区块: #{focusedRuleResult.result.targetHeight}</span>
-                      <span className="px-4 py-1.5 bg-emerald-100 text-emerald-700 text-xs font-black rounded-xl border border-emerald-200">共振模型: {focusedRuleResult.result.detectedCycle}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="bg-slate-900 p-8 rounded-[3rem] border border-slate-800 shadow-inner">
-                  <p className="text-white font-medium text-xl leading-relaxed italic">
-                    “{focusedRuleResult.result.analysis} 数据熵值为 {focusedRuleResult.result.entropyScore}，系统判定为【极佳捕获窗口】。”
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-8 shrink-0 w-full lg:w-auto">
-                 <div className="bg-white p-10 rounded-[3.5rem] border-4 border-red-500/10 shadow-xl text-center">
-                    <span className="text-[11px] font-black text-gray-400 uppercase tracking-widest block mb-4">建议 (单双)</span>
-                    <div className="text-7xl font-black mb-6" style={{ color: focusedRuleResult.result.nextParity === 'ODD' ? 'var(--color-odd)' : 'var(--color-even)' }}>
-                      {focusedRuleResult.result.nextParity === 'NEUTRAL' ? '-' : (focusedRuleResult.result.nextParity === 'ODD' ? '单' : '双')}
-                    </div>
-                    <div className="px-4 py-1.5 bg-red-50 text-red-600 text-[11px] font-black rounded-full uppercase">置信度 {focusedRuleResult.result.parityConfidence}%</div>
-                 </div>
-                 <div className="bg-white p-10 rounded-[3.5rem] border-4 border-indigo-500/10 shadow-xl text-center">
-                    <span className="text-[11px] font-black text-gray-400 uppercase tracking-widest block mb-4">建议 (大小)</span>
-                    <div className="text-7xl font-black mb-6" style={{ color: focusedRuleResult.result.nextSize === 'BIG' ? 'var(--color-big)' : 'var(--color-small)' }}>
-                      {focusedRuleResult.result.nextSize === 'NEUTRAL' ? '-' : (focusedRuleResult.result.nextSize === 'BIG' ? '大' : '小')}
-                    </div>
-                    <div className="px-4 py-1.5 bg-indigo-50 text-indigo-600 text-[11px] font-black rounded-full uppercase">置信度 {focusedRuleResult.result.sizeConfidence}%</div>
-                 </div>
-              </div>
-           </div>
-        </section>
       )}
 
       {/* HISTORY TABLE */}

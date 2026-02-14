@@ -13,7 +13,10 @@ import {
   runWaveletModel,
   runMarkovModel,
   checkDensity,
-  getBayesianConf
+  getBayesianConf,
+  runRLEModel,
+  runFibonacciModel,
+  runGradientMomentumModel
 } from './aiModels';
 
 interface ModelCandidate {
@@ -65,8 +68,8 @@ export const runDeepAnalysisV5 = (
   }
 
   // 准备序列数据
-  const pSeq = ruleBlocks.slice(0, 20).map(b => b.type === 'ODD' ? 'O' : 'E').join('');
-  const sSeq = ruleBlocks.slice(0, 20).map(b => b.sizeType === 'BIG' ? 'B' : 'S').join('');
+  const pSeq = ruleBlocks.slice(0, 40).map(b => b.type === 'ODD' ? 'O' : 'E').join('');
+  const sSeq = ruleBlocks.slice(0, 40).map(b => b.sizeType === 'BIG' ? 'B' : 'S').join('');
   
   const oddCount = ruleBlocks.filter(b => b.type === 'ODD').length;
   const bigCount = ruleBlocks.filter(b => b.sizeType === 'BIG').length;
@@ -179,6 +182,39 @@ export const runDeepAnalysisV5 = (
     candidates.push({ type: 'size', value: markovS.val, confidence: markovS.conf, modelName: markovS.modelName });
   }
 
+  // 10. 游程编码分析
+  const rleP = runRLEModel(pSeq, 'parity');
+  if (rleP.match && (rleP.val === 'ODD' || rleP.val === 'EVEN')) {
+    candidates.push({ type: 'parity', value: rleP.val, confidence: rleP.conf, modelName: rleP.modelName });
+  }
+
+  const rleS = runRLEModel(sSeq, 'size');
+  if (rleS.match && (rleS.val === 'BIG' || rleS.val === 'SMALL')) {
+    candidates.push({ type: 'size', value: rleS.val, confidence: rleS.conf, modelName: rleS.modelName });
+  }
+
+  // 11. 斐波那契回撤
+  const fibP = runFibonacciModel(pSeq, 'parity');
+  if (fibP.match && (fibP.val === 'ODD' || fibP.val === 'EVEN')) {
+    candidates.push({ type: 'parity', value: fibP.val, confidence: fibP.conf, modelName: fibP.modelName });
+  }
+
+  const fibS = runFibonacciModel(sSeq, 'size');
+  if (fibS.match && (fibS.val === 'BIG' || fibS.val === 'SMALL')) {
+    candidates.push({ type: 'size', value: fibS.val, confidence: fibS.conf, modelName: fibS.modelName });
+  }
+
+  // 12. 梯度动量模型
+  const gradP = runGradientMomentumModel(pSeq, 'parity');
+  if (gradP.match && (gradP.val === 'ODD' || gradP.val === 'EVEN')) {
+    candidates.push({ type: 'parity', value: gradP.val, confidence: gradP.conf, modelName: gradP.modelName });
+  }
+
+  const gradS = runGradientMomentumModel(sSeq, 'size');
+  if (gradS.match && (gradS.val === 'BIG' || gradS.val === 'SMALL')) {
+    candidates.push({ type: 'size', value: gradS.val, confidence: gradS.conf, modelName: gradS.modelName });
+  }
+
   // ============================================
   // 选择最优结果（分别选择单双和大小的最佳模型）
   // ============================================
@@ -225,12 +261,38 @@ export const runDeepAnalysisV5 = (
     sizeModel = bestSize.modelName;
   }
 
+  // 模型共识投票：多模型一致时增强置信度，分歧时降低
+  if (parityCandidates.length >= 3) {
+    const majorityVal = parityCandidates[0].value;
+    const agreeCount = parityCandidates.filter(c => c.value === majorityVal).length;
+    if (agreeCount >= 3) confP = Math.min(99, confP + 3);
+    else if (agreeCount === 1) confP = Math.max(85, confP - 3);
+  }
+  if (sizeCandidates.length >= 3) {
+    const majorityVal = sizeCandidates[0].value;
+    const agreeCount = sizeCandidates.filter(c => c.value === majorityVal).length;
+    if (agreeCount >= 3) confS = Math.min(99, confS + 3);
+    else if (agreeCount === 1) confS = Math.max(85, confS - 3);
+  }
+
   // 确定主导模型（用于显示）
   const primaryModel = confP >= confS ? parityModel : sizeModel;
   const maxConf = Math.max(confP, confS);
 
-  const entropy = Math.round(Math.random() * 20 + 10);
-  const shouldPredict = (confP >= 90 || confS >= 90) && entropy < 40;
+  // 计算真实 Shannon 熵（0~100 标度）
+  const calcShannonEntropy = (seq: string): number => {
+    const freq: Record<string, number> = {};
+    for (const c of seq) freq[c] = (freq[c] || 0) + 1;
+    let h = 0;
+    for (const count of Object.values(freq)) {
+      const p = count / seq.length;
+      if (p > 0) h -= p * Math.log2(p);
+    }
+    // 二元序列最大熵 = 1.0，缩放到 0~100
+    return Math.round(h * 100);
+  };
+  const entropy = Math.round((calcShannonEntropy(pSeq) + calcShannonEntropy(sSeq)) / 2);
+  const shouldPredict = (confP >= 90 || confS >= 90) && entropy < 85;
 
   // 生成分析文本
   let analysis = '';
@@ -254,7 +316,7 @@ export const runDeepAnalysisV5 = (
     sizeConfidence: Math.min(99, Math.round(confS)),
     analysis,
     detectedCycle: primaryModel || '观望中',
-    riskLevel: entropy < 25 ? 'LOW' : 'MEDIUM',
+    riskLevel: entropy < 60 ? 'LOW' : entropy < 85 ? 'MEDIUM' : 'HIGH',
     entropyScore: entropy,
     targetHeight,
     ruleId: rule.id
